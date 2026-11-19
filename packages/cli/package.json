@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@todo/core": "workspace:*",
+    "@todo/tui": "workspace:*",
     "citty": "^0.2.2"
   }
 }

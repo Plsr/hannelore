@@ -67,7 +67,12 @@ async function run(): Promise<void> {
     return;
   }
   if (argv.length === 0) {
-    await printUsage();
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const { runTui } = await import("@todo/tui");
+      await runTui();
+    } else {
+      await printUsage();
+    }
     return;
   }
   await runCommand(main, { rawArgs: argv });

@@ -1,0 +1,5 @@
+# OpenTUI's Solid JSX needs its Babel transform; `bun build` uses the matching plugin instead.
+preload = ["./packages/tui/preload.ts"]
+
+[test]
+preload = ["./packages/tui/preload.ts"]

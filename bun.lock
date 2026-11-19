@@ -14,6 +14,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@todo/core": "workspace:*",
+        "@todo/tui": "workspace:*",
         "citty": "^0.2.2",
       },
     },
@@ -27,6 +28,7 @@
       "dependencies": {
         "@opentui/core": "^0.9.4",
         "@opentui/solid": "^0.9.4",
+        "@todo/core": "workspace:*",
         "solid-js": "^1.9.12",
       },
     },
