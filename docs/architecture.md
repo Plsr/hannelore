@@ -39,6 +39,8 @@ Exporting is copying the directory. Versioning is git.
 
 Each to-do is one Markdown file named by its ULID, which never changes. The CLI and TUI display a short prefix such as `t-3fk2`.
 
+Fields are always written in the order below, and unset optional fields (`project`, `tags`, `due`, `priority`, and the idempotency `key`) are left out.
+
 ```markdown
 ---
 id: 01JD3K7Q9XW2M4V8R5T6Y1Z0AB
@@ -48,6 +50,8 @@ project: todo-app
 tags: [docs, planning]
 due: 2026-11-21
 priority: 2
+created_at: 2026-11-18T09:12:44.512Z
+updated_at: 2026-11-19T10:42:01.123Z
 created_by: human:cj
 updated_by: agent:claude
 rev: 4
@@ -62,7 +66,7 @@ All writes are atomic: write to a temp file in the same directory, then rename o
 
 ### Audit log
 
-Every mutation appends one line to `log/<actor>.jsonl`:
+Every mutation appends one line to `log/<actor>.jsonl`, with the colon in the actor written as a dash (`log/agent-claude.jsonl`). Actor names are limited to letters, digits, `.`, `_` and `-`, so every actor maps to a safe file name:
 
 ```json
 {"ts":"2026-11-19T10:42:01.123Z","actor":"agent:claude","op":"update","id":"01JD3K…","rev":4,"diff":{"status":["open","done"]}}
@@ -101,6 +105,7 @@ Other cases:
 - **Schema version change or corrupt index**: delete and rebuild from the files.
 - **Live TUI**: `fs.watch` on `.todo/` triggers the same reconcile, so an agent's changes appear in the human's TUI immediately.
 - **Concurrent reconciles** are safe because upserts are idempotent.
+- **A file that fails to parse** is left out of the index and reported by every reconcile until it is fixed. It never breaks a listing.
 - **An edit that leaves mtime and size unchanged** is missed. This is practically impossible with nanosecond mtimes on APFS. `todo reindex` forces a full rebuild.
 
 ### Scaling
@@ -111,6 +116,8 @@ The stat pass grows with the number of files in `todos/`. Measured with Bun 1.3.
 |---|---|---|
 | 3,650 | 1 year at 10 to-dos/day | ~6 ms |
 | 36,500 | 10 years | ~60 ms |
+
+With 3,650 to-dos, `scripts/bench-reconcile.ts` measures a no-op reconcile at ~10 ms, of which ~7 ms is the stat pass, and a full reindex at ~170 ms.
 
 The first years are well within budget. Archiving finished to-dos (see [Future work](#future-work)) keeps the cost flat over longer periods.
 
