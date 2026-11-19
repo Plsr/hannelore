@@ -25,16 +25,11 @@ const strict: CittyPlugin = {
   },
 };
 
-const jsonArg = {
-  type: "boolean",
-  description: "Print JSON (default when stdout is not a TTY)",
-} as const;
-
 const hello = defineCommand({
   meta: { name: "hello", description: "Print a greeting" },
   args: {
     name: { type: "string", description: "Who to greet", valueHint: "name" },
-    json: jsonArg,
+    json: { type: "boolean", description: "Print JSON (default when stdout is not a TTY)" },
   },
   plugins: [strict],
   run({ args }) {
