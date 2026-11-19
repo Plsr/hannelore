@@ -31,6 +31,9 @@ import {
 import { parseEvent, parseTodo, parseTodoFile, serializeTodo } from "./todo-file";
 import { nextUlid } from "./ulid";
 
+/** Bytes kept from just before a log's read offset, to notice the file being rewritten in place. */
+const LOG_TAIL = 256;
+
 const EDITABLE: readonly EditableField[] = ["title", "status", "project", "tags", "due", "priority", "body"];
 
 export function openStore(root: string, opts: { now?: () => Date } = {}): Store {
@@ -114,29 +117,34 @@ export function openStore(root: string, opts: { now?: () => Date } = {}): Store 
   }
 
   function reconcileLogs() {
-    const offsets = index.logOffsets();
+    const marks = index.logMarks();
     for (const file of readdirSync(logDir)) {
       if (!file.endsWith(".jsonl")) continue;
-      const from = offsets.get(file);
-      const offset = from ?? 0;
-      offsets.delete(file);
+      const mark = marks.get(file);
+      marks.delete(file);
       const path = join(logDir, file);
-      const size = statSync(path).size;
-      if (size === offset) continue;
-      // A shorter file was rewritten (git checkout, hand edit), so read it again from the start.
-      const reset = size < offset;
-      const start = reset ? 0 : offset;
+      const stat = statSync(path, { bigint: true });
+      const size = Number(stat.size);
+      const ino = String(stat.ino);
+      // Store writes append in place. git checkout and most editors replace the file (new inode);
+      // a shorter file or changed bytes before the mark mean it was rewritten in place.
+      const grown = mark !== undefined && mark.ino === ino && size >= mark.offset;
+      if (grown && size === mark.offset) continue;
+      const append =
+        grown && Buffer.compare(readRange(path, mark.offset - mark.tail.length, mark.offset), mark.tail) === 0;
+      const start = append ? mark.offset : 0;
       const bytes = readRange(path, start, size);
       // A writer may be mid-append; leave a trailing partial line for the next reconcile.
-      const end = bytes.lastIndexOf(0x0a) + 1;
+      const end = start + bytes.lastIndexOf(0x0a) + 1;
       const events = bytes
-        .subarray(0, end)
+        .subarray(0, end - start)
         .toString("utf8")
         .split("\n")
         .flatMap((line) => parseEvent(line) ?? []);
-      index.applyLog(file, from, events, start + end, reset);
+      const tail = readRange(path, Math.max(0, end - LOG_TAIL), end);
+      index.applyLog(file, mark, events, { offset: end, ino, tail }, !append);
     }
-    for (const [gone, from] of offsets) index.applyLog(gone, from, [], null, true);
+    for (const [gone, mark] of marks) index.applyLog(gone, mark, [], null, true);
   }
 
   function reconcile(): ReconcileResult {

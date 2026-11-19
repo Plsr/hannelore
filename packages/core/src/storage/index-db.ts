@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
 import type { Event, ListFilter, Todo, TodoId } from "./model";
 
-const SCHEMA_VERSION = "1";
+const SCHEMA_VERSION = "2";
 
 const SCHEMA = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
@@ -55,10 +55,17 @@ CREATE INDEX events_todo ON events (todo_id, ts);
 CREATE INDEX events_actor ON events (actor, ts);
 CREATE INDEX events_source ON events (source);
 CREATE TABLE files (path TEXT PRIMARY KEY, mtime_ns TEXT NOT NULL, size INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE logs (source TEXT PRIMARY KEY, offset INTEGER NOT NULL, ino TEXT NOT NULL, tail BLOB NOT NULL) WITHOUT ROWID;
 `;
 
 /** What a source file looked like when it was indexed. mtime is a bigint ns string; it does not fit a JS number. */
 export type FileStamp = { mtimeNs: string; size: number };
+
+/**
+ * How far a log file has been read: the byte offset, the file's inode (a bigint string), and the
+ * bytes just before the offset. A new inode or different tail bytes mean the file was rewritten.
+ */
+export type LogMark = { offset: number; ino: string; tail: Uint8Array };
 
 type TodoRow = Omit<Todo, "tags" | "project" | "due" | "priority" | "key"> & {
   tags: string;
@@ -70,7 +77,12 @@ type TodoRow = Omit<Todo, "tags" | "project" | "due" | "priority" | "key"> & {
 
 type EventRow = Omit<Event, "diff"> & { diff: string | null };
 
-const LOG_OFFSET = "log:";
+type MarkRow = LogMark & { source: string };
+
+function sameMark(a: LogMark | undefined, b: LogMark | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.offset === b.offset && a.ino === b.ino && Buffer.compare(a.tail, b.tail) === 0;
+}
 
 /** The disposable SQLite index. Everything in it can be rebuilt from the files. */
 export type Index = ReturnType<typeof openIndex>;
@@ -92,21 +104,21 @@ export function openIndex(path: string) {
   const insertEvent = db.query(
     "INSERT INTO events (source, ts, actor, op, todo_id, rev, diff) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
-  const setMeta = db.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
 
-  const getMeta = db.query("SELECT value FROM meta WHERE key = ?");
+  const selectMarks = db.query("SELECT source, offset, ino, tail FROM logs");
+  const selectMark = db.query("SELECT source, offset, ino, tail FROM logs WHERE source = ?");
+  const upsertMark = db.query("INSERT OR REPLACE INTO logs (source, offset, ino, tail) VALUES (?, ?, ?, ?)");
 
   const applyLog = db.transaction(
-    (source: string, from: number | undefined, events: Event[], offset: number | null, reset: boolean) => {
-      const key = LOG_OFFSET + source;
-      const stored = getMeta.get(key) as { value: string } | null;
-      if ((stored === null ? undefined : Number(stored.value)) !== from) return;
+    (source: string, from: LogMark | undefined, events: Event[], to: LogMark | null, reset: boolean) => {
+      const stored = selectMark.get(source) as MarkRow | null;
+      if (!sameMark(stored ?? undefined, from)) return;
       if (reset) db.query("DELETE FROM events WHERE source = ?").run(source);
       for (const e of events) {
         insertEvent.run(source, e.ts, e.actor, e.op, e.id, e.rev, e.diff ? JSON.stringify(e.diff) : null);
       }
-      if (offset === null) db.query("DELETE FROM meta WHERE key = ?").run(key);
-      else setMeta.run(key, String(offset));
+      if (to === null) db.query("DELETE FROM logs WHERE source = ?").run(source);
+      else upsertMark.run(source, to.offset, to.ino, to.tail);
     },
   );
 
@@ -202,28 +214,24 @@ export function openIndex(path: string) {
       return rows.map(({ diff, ...event }) => (diff === null ? event : { ...event, diff: JSON.parse(diff) }));
     },
 
-    logOffsets(): Map<string, number> {
-      const rows = db.query("SELECT key, value FROM meta WHERE key >= ? AND key < ?").all(LOG_OFFSET, "log;") as {
-        key: string;
-        value: string;
-      }[];
-      return new Map(rows.map((r) => [r.key.slice(LOG_OFFSET.length), Number(r.value)]));
+    logMarks(): Map<string, LogMark> {
+      return new Map((selectMarks.all() as MarkRow[]).map(({ source, ...mark }) => [source, mark]));
     },
 
     /**
-     * Records events read from `source` from offset `from` (undefined: never read) up to `offset`.
-     * `reset` first drops what was read before. Skips the batch when another process moved the
-     * stored offset since `from` was read, because it already recorded these events.
+     * Records events read from `source` between marks `from` (undefined: never read) and `to`
+     * (null: the file is gone). `reset` first drops what was read before. Skips the batch when
+     * another process moved the stored mark since `from` was read, because it already recorded these events.
      */
-    applyLog: (source: string, from: number | undefined, events: Event[], offset: number | null, reset: boolean) =>
-      applyLog.immediate(source, from, events, offset, reset),
+    applyLog: (source: string, from: LogMark | undefined, events: Event[], to: LogMark | null, reset: boolean) =>
+      applyLog.immediate(source, from, events, to, reset),
 
     clear: db.transaction(() => {
       db.run("DELETE FROM todos");
       db.run("DELETE FROM todo_tags");
       db.run("DELETE FROM events");
       db.run("DELETE FROM files");
-      db.query("DELETE FROM meta WHERE key >= ? AND key < ?").run(LOG_OFFSET, "log;");
+      db.run("DELETE FROM logs");
     }),
 
     close() {

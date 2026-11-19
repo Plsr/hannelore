@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -529,6 +529,46 @@ test("history follows a log file rewritten shorter, as after a git checkout", ()
   writeFileSync(join(root, "log", name), `${JSON.stringify(events[0])}\n`);
 
   expect(store.history(todo.id).map((e) => e.op)).toEqual(["create"]);
+});
+
+function longerRewrite(id: TodoId): string {
+  const events: Event[] = [
+    { ts: "2026-11-19T09:00:00.000Z", actor: "agent:other", op: "create", id, rev: 1 },
+    { ts: "2026-11-19T09:30:00.000Z", actor: "agent:other", op: "update", id, rev: 2, diff: { title: ["a", "b"] } },
+  ];
+  return events.map((e) => `${JSON.stringify(e)}\n`).join("");
+}
+
+test("history follows a log file replaced by a longer one, as after a git checkout", () => {
+  const store = open();
+  const todo = store.create({ title: "x" }, cj);
+  expect(store.history(todo.id)).toHaveLength(1);
+
+  const [name] = Object.keys(logEvents());
+  const path = join(root, "log", name!);
+  const content = longerRewrite(todo.id);
+  expect(content.length).toBeGreaterThan(statSync(path).size);
+  writeFileSync(`${path}.tmp`, content);
+  renameSync(`${path}.tmp`, path);
+
+  expect(store.history(todo.id).map((e) => [e.actor, e.op])).toEqual([
+    ["agent:other", "create"],
+    ["agent:other", "update"],
+  ]);
+});
+
+test("history follows a log file rewritten longer in place", () => {
+  const store = open();
+  const todo = store.create({ title: "x" }, cj);
+  expect(store.history(todo.id)).toHaveLength(1);
+
+  const [name] = Object.keys(logEvents());
+  writeFileSync(join(root, "log", name!), longerRewrite(todo.id));
+
+  expect(store.history(todo.id).map((e) => [e.actor, e.op])).toEqual([
+    ["agent:other", "create"],
+    ["agent:other", "update"],
+  ]);
 });
 
 test("two stores reconciling the same log lines at once record each event once", () => {

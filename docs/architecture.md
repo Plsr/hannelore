@@ -85,14 +85,15 @@ Schema:
 - `todos_fts`: FTS5 over title and body
 - `events`: the audit log, indexed by to-do and actor
 - `files(path, mtime_ns, size)`: the state of each source file when it was last indexed
-- `meta`: schema version, and the byte offset read so far in each log file
+- `logs(source, offset, ino, tail)`: how far each log file has been read, its inode, and the bytes just before that offset
+- `meta`: schema version
 
 Every command reconciles the index before running its query:
 
 1. Open the database in WAL mode with a busy timeout, so a running TUI and agent commands do not block each other.
 2. List `todos/` and stat every file. Compare `mtime_ns` and `size` against the `files` table.
 3. In a single transaction, parse and upsert new or changed files, and delete rows whose file is gone.
-4. For each `log/*.jsonl`, compare its size against the stored offset and parse only the appended bytes.
+4. For each `log/*.jsonl`, compare its size against the stored offset and parse only the appended bytes. A new inode, a shorter file, or changed bytes before the offset mean the file was rewritten (git checkout, editor save), so it is read again from the start. The new offset is recorded only if no other process moved it in the meantime.
 5. Run the query as SQL.
 
 When nothing changed, step 3 is a no-op. A command then costs startup, the stat pass and a single query.
