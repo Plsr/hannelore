@@ -518,6 +518,18 @@ test("history picks up log lines appended by another writer", () => {
   expect(store.history(todo.id).map((e) => e.actor)).toEqual([cj, "agent:other"]);
 });
 
+test("history follows a log file rewritten shorter, as after a git checkout", () => {
+  const store = open();
+  const todo = store.create({ title: "x" }, cj);
+  store.update(todo.id, { title: "y" }, cj);
+  expect(store.history(todo.id)).toHaveLength(2);
+
+  const [name, events] = Object.entries(logEvents())[0]!;
+  writeFileSync(join(root, "log", name), `${JSON.stringify(events[0])}\n`);
+
+  expect(store.history(todo.id).map((e) => e.op)).toEqual(["create"]);
+});
+
 test("two stores on the same root see each other's writes", () => {
   const a = open();
   const b = open();
