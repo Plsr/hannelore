@@ -117,7 +117,8 @@ export function openStore(root: string, opts: { now?: () => Date } = {}): Store 
     const offsets = index.logOffsets();
     for (const file of readdirSync(logDir)) {
       if (!file.endsWith(".jsonl")) continue;
-      const offset = offsets.get(file) ?? 0;
+      const from = offsets.get(file);
+      const offset = from ?? 0;
       offsets.delete(file);
       const path = join(logDir, file);
       const size = statSync(path).size;
@@ -133,9 +134,9 @@ export function openStore(root: string, opts: { now?: () => Date } = {}): Store 
         .toString("utf8")
         .split("\n")
         .flatMap((line) => parseEvent(line) ?? []);
-      index.applyLog(file, events, start + end, reset);
+      index.applyLog(file, from, events, start + end, reset);
     }
-    for (const gone of offsets.keys()) index.applyLog(gone, [], null, true);
+    for (const [gone, from] of offsets) index.applyLog(gone, from, [], null, true);
   }
 
   function reconcile(): ReconcileResult {

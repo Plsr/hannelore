@@ -94,6 +94,22 @@ export function openIndex(path: string) {
   );
   const setMeta = db.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
 
+  const getMeta = db.query("SELECT value FROM meta WHERE key = ?");
+
+  const applyLog = db.transaction(
+    (source: string, from: number | undefined, events: Event[], offset: number | null, reset: boolean) => {
+      const key = LOG_OFFSET + source;
+      const stored = getMeta.get(key) as { value: string } | null;
+      if ((stored === null ? undefined : Number(stored.value)) !== from) return;
+      if (reset) db.query("DELETE FROM events WHERE source = ?").run(source);
+      for (const e of events) {
+        insertEvent.run(source, e.ts, e.actor, e.op, e.id, e.rev, e.diff ? JSON.stringify(e.diff) : null);
+      }
+      if (offset === null) db.query("DELETE FROM meta WHERE key = ?").run(key);
+      else setMeta.run(key, String(offset));
+    },
+  );
+
   const putTodo = (todo: Todo, file: string, stamp: FileStamp) => {
     upsertTodo.run(
       todo.id,
@@ -194,15 +210,13 @@ export function openIndex(path: string) {
       return new Map(rows.map((r) => [r.key.slice(LOG_OFFSET.length), Number(r.value)]));
     },
 
-    /** Records events read from `source` and the byte offset read up to. `reset` first drops what was read before. */
-    applyLog: db.transaction((source: string, events: Event[], offset: number | null, reset: boolean) => {
-      if (reset) db.query("DELETE FROM events WHERE source = ?").run(source);
-      for (const e of events) {
-        insertEvent.run(source, e.ts, e.actor, e.op, e.id, e.rev, e.diff ? JSON.stringify(e.diff) : null);
-      }
-      if (offset === null) db.query("DELETE FROM meta WHERE key = ?").run(LOG_OFFSET + source);
-      else setMeta.run(LOG_OFFSET + source, String(offset));
-    }),
+    /**
+     * Records events read from `source` from offset `from` (undefined: never read) up to `offset`.
+     * `reset` first drops what was read before. Skips the batch when another process moved the
+     * stored offset since `from` was read, because it already recorded these events.
+     */
+    applyLog: (source: string, from: number | undefined, events: Event[], offset: number | null, reset: boolean) =>
+      applyLog.immediate(source, from, events, offset, reset),
 
     clear: db.transaction(() => {
       db.run("DELETE FROM todos");

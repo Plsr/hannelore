@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -528,6 +529,31 @@ test("history follows a log file rewritten shorter, as after a git checkout", ()
   writeFileSync(join(root, "log", name), `${JSON.stringify(events[0])}\n`);
 
   expect(store.history(todo.id).map((e) => e.op)).toEqual(["create"]);
+});
+
+test("two stores reconciling the same log lines at once record each event once", () => {
+  const a = open();
+  const b = open();
+  const todo = a.create({ title: "x" }, cj);
+
+  // Let b reconcile while a has read the log but not yet recorded what it read.
+  const readSync = fs.readSync;
+  let interleaved = false;
+  const spy = spyOn(fs, "readSync").mockImplementation(((...args: Parameters<typeof readSync>) => {
+    if (!interleaved) {
+      interleaved = true;
+      b.reconcile();
+    }
+    return readSync(...args);
+  }) as typeof readSync);
+  try {
+    a.reconcile();
+  } finally {
+    spy.mockRestore();
+  }
+
+  expect(interleaved).toBe(true);
+  expect(a.history(todo.id).map((e) => e.op)).toEqual(["create"]);
 });
 
 test("two stores on the same root see each other's writes", () => {
