@@ -339,6 +339,7 @@ test("list filters by status, project and all-of tags", () => {
   expect(ids({ tags: ["urgent", "x"] })).toEqual([a.id]);
   expect(ids({ project: "work", status: "done", tags: ["x"] })).toEqual([b.id]);
   expect(ids({ tags: ["nope"] })).toEqual([]);
+  expect(ids({ status: [] })).toEqual([]);
 });
 
 test("ids sort in creation order, even within one millisecond", () => {
