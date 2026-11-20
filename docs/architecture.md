@@ -31,9 +31,23 @@ Plain-text files are the source of truth. A local SQLite database is a disposabl
   views.toml             # saved views
   config.toml
   .cache.db              # SQLite index, gitignored, rebuildable
+  .gitignore             # ignores .cache.db*
 ```
 
 Exporting is copying the directory. Versioning is git.
+
+### Store location
+
+The first match wins:
+
+1. `--dir <path>`
+2. `TODO_DIR`, ignored when empty
+3. The nearest `.todo/` directory in the working directory or one of its ancestors. A plain file named `.todo` is skipped.
+4. `~/.todo`, the global store
+
+Relative paths in `--dir` and `TODO_DIR` resolve against the working directory. `mkdir .todo` in a repo gives it its own store. A `.todo/` found by walking up that is `~/.todo` still counts as the global store.
+
+Opening a store creates any missing directories and writes `.todo/.gitignore` if there is none, so the index stays out of git in any repo. An existing `.gitignore` is left alone.
 
 ### To-do files
 
