@@ -84,6 +84,18 @@ test("openStore creates the todos and log directories", () => {
   expect(statSync(join(root, "log")).isDirectory()).toBe(true);
 });
 
+test("openStore writes a .gitignore that keeps the index out of git", () => {
+  open();
+  expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(".cache.db*\n");
+});
+
+test("openStore leaves an existing .gitignore alone", () => {
+  fs.mkdirSync(root);
+  writeFileSync(join(root, ".gitignore"), "custom\n");
+  open();
+  expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe("custom\n");
+});
+
 test("parseActor accepts human and agent actors and rejects anything else", () => {
   expect(parseActor("human:cj")).toBe("human:cj");
   expect(parseActor("agent:claude")).toBe("agent:claude");

@@ -36,12 +36,21 @@ const LOG_TAIL = 256;
 
 const EDITABLE: readonly EditableField[] = ["title", "status", "project", "tags", "due", "priority", "body"];
 
+function writeIfAbsent(path: string, content: string) {
+  try {
+    writeFileSync(path, content, { flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+}
+
 export function openStore(root: string, opts: { now?: () => Date } = {}): Store {
   const now = opts.now ?? (() => new Date());
   const todosDir = join(root, "todos");
   const logDir = join(root, "log");
   mkdirSync(todosDir, { recursive: true });
   mkdirSync(logDir, { recursive: true });
+  writeIfAbsent(join(root, ".gitignore"), ".cache.db*\n");
   const index = openIndex(join(root, ".cache.db"));
 
   const fileOf = (id: TodoId) => `${id}.md`;
