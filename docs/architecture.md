@@ -51,7 +51,7 @@ Opening a store creates any missing directories and writes `.todo/.gitignore` if
 
 ### To-do files
 
-Each to-do is one Markdown file named by its ULID, which never changes. The CLI and TUI display a short prefix such as `t-3fk2`.
+Each to-do is one Markdown file named by its ULID, which never changes. The CLI and TUI display a short ID such as `t-3fk2`, made of `t-` and the shortest suffix of the ULID, at least 4 characters, that no other to-do's ULID ends with. It is a suffix because the first 10 characters of a ULID are its timestamp, so to-dos made in the same few days share a prefix. Commands accept a short ID, the suffix without `t-`, or the full ULID, in any case.
 
 Fields are always written in the order below, and unset optional fields (`project`, `tags`, `due`, `priority`, and the idempotency `key`) are left out.
 

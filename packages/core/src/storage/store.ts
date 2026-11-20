@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { type FileStamp, type Index, openIndex } from "./index-db";
 import {
   type Actor,
+  AmbiguousIdError,
   type CreateInput,
   type EditableField,
   type Event,
@@ -28,6 +29,7 @@ import {
   type TodoId,
   type TodoPatch,
 } from "./model";
+import { parseIdRef, shortenIds } from "./short-id";
 import { parseEvent, parseTodo, parseTodoFile, serializeTodo } from "./todo-file";
 import { nextUlid } from "./ulid";
 
@@ -215,6 +217,21 @@ export function openStore(root: string, opts: { now?: () => Date } = {}): Store 
       const todo = index.todo(id);
       if (!todo) throw new NotFoundError(id);
       return todo;
+    },
+
+    resolveId(ref: string): TodoId {
+      const suffix = parseIdRef(ref);
+      reconcileTodos();
+      const matches = index.idsEndingWith(suffix);
+      if (matches.length === 1) return matches[0]!;
+      if (matches.length === 0) throw new NotFoundError(ref);
+      const short = shortenIds(index.ids());
+      throw new AmbiguousIdError(ref, matches.map((id) => short.get(id)!));
+    },
+
+    shortIds(): Map<TodoId, string> {
+      reconcileTodos();
+      return shortenIds(index.ids());
     },
 
     list(filter = {}) {

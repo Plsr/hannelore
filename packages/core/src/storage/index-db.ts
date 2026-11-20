@@ -179,6 +179,17 @@ export function openIndex(path: string) {
       return row ? fromRow(row) : undefined;
     },
 
+    ids(): TodoId[] {
+      return (db.query("SELECT id FROM todos").values() as [TodoId][]).map(([id]) => id);
+    },
+
+    /** `suffix` must be uppercase Crockford base32, so it holds no LIKE wildcards. */
+    idsEndingWith(suffix: string): TodoId[] {
+      return (db.query("SELECT id FROM todos WHERE id LIKE '%' || ? ORDER BY id").values(suffix) as [TodoId][]).map(
+        ([id]) => id,
+      );
+    },
+
     todoByKey(key: string): Todo | undefined {
       const row = db.query("SELECT * FROM todos WHERE key = ? ORDER BY id LIMIT 1").get(key) as TodoRow | null;
       return row ? fromRow(row) : undefined;
