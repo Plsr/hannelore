@@ -180,14 +180,7 @@ export function openIndex(path: string) {
     },
 
     ids(): TodoId[] {
-      return (db.query("SELECT id FROM todos").values() as [TodoId][]).map(([id]) => id);
-    },
-
-    /** `suffix` must be uppercase Crockford base32, so it holds no LIKE wildcards. */
-    idsEndingWith(suffix: string): TodoId[] {
-      return (db.query("SELECT id FROM todos WHERE id LIKE '%' || ? ORDER BY id").values(suffix) as [TodoId][]).map(
-        ([id]) => id,
-      );
+      return (db.query("SELECT id FROM todos ORDER BY id").values() as [TodoId][]).map(([id]) => id);
     },
 
     todoByKey(key: string): Todo | undefined {

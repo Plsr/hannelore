@@ -222,10 +222,11 @@ export function openStore(root: string, opts: { now?: () => Date } = {}): Store 
     resolveId(ref: string): TodoId {
       const suffix = parseIdRef(ref);
       reconcileTodos();
-      const matches = index.idsEndingWith(suffix);
+      const ids = index.ids();
+      const matches = ids.filter((id) => id.endsWith(suffix));
       if (matches.length === 1) return matches[0]!;
       if (matches.length === 0) throw new NotFoundError(ref);
-      const short = shortenIds(index.ids());
+      const short = shortenIds(ids);
       throw new AmbiguousIdError(ref, matches.map((id) => short.get(id)!));
     },
 
