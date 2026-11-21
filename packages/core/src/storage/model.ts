@@ -73,6 +73,10 @@ export interface Store {
   update(id: TodoId, patch: TodoPatch, actor: Actor, opts?: { ifRev?: number }): Todo;
   delete(id: TodoId, actor: Actor, opts?: { ifRev?: number }): void;
   get(id: TodoId): Todo;
+  /** Resolves a full id, `t-<suffix>`, or a bare suffix of at least 4 chars to the one todo id ending with it. */
+  resolveId(ref: string): TodoId;
+  /** The display id of every todo, such as `t-3fk2`, built from the shortest unique suffix of its id, at least 4 chars. */
+  shortIds(): Map<TodoId, string>;
   list(filter?: ListFilter): Todo[];
   history(id: TodoId): Event[];
   reconcile(): ReconcileResult;
@@ -84,6 +88,16 @@ export class NotFoundError extends Error {
   override name = "NotFoundError";
   constructor(readonly id: string) {
     super(`No todo with id ${id}`);
+  }
+}
+
+export class AmbiguousIdError extends Error {
+  override name = "AmbiguousIdError";
+  constructor(
+    readonly ref: string,
+    readonly candidates: string[],
+  ) {
+    super(`Todo id ${ref} is ambiguous, it matches ${candidates.join(", ")}`);
   }
 }
 
