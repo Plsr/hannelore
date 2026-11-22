@@ -179,6 +179,10 @@ export function openIndex(path: string) {
       return row ? fromRow(row) : undefined;
     },
 
+    ids(): TodoId[] {
+      return (db.query("SELECT id FROM todos ORDER BY id").values() as [TodoId][]).map(([id]) => id);
+    },
+
     todoByKey(key: string): Todo | undefined {
       const row = db.query("SELECT * FROM todos WHERE key = ? ORDER BY id LIMIT 1").get(key) as TodoRow | null;
       return row ? fromRow(row) : undefined;
