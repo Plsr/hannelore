@@ -1,6 +1,5 @@
 import { createCliRenderer } from "@opentui/core";
 import { render, useKeyboard, useRenderer } from "@opentui/solid";
-import { greet } from "@todo/core";
 
 export function App() {
   const renderer = useRenderer();
@@ -9,7 +8,7 @@ export function App() {
   });
   return (
     <box flexDirection="column" padding={1}>
-      <text>{greet().message}</text>
+      <text>todo</text>
       <text fg="#808080">q to quit</text>
     </box>
   );

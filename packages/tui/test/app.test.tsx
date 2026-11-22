@@ -10,11 +10,11 @@ afterEach(async () => {
   setup = undefined;
 });
 
-test("shows the greeting and the quit hint", async () => {
+test("shows the title and the quit hint", async () => {
   setup = await testRender(() => <App />, { width: 40, height: 10 });
   await setup.renderOnce();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("Hello, world!");
+  expect(frame).toContain("todo");
   expect(frame).toContain("q to quit");
 });
 

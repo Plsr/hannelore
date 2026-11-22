@@ -22,10 +22,24 @@ bun run build          # single binary at dist/todo
 
 ## Agent CLI contract
 
-- `todo hello [--name <n>]` prints `Hello, <n>!`. `<n>` defaults to `world`.
-- `--json` prints `{"message":"Hello, <n>!"}`. JSON is also the default when stdout is not a TTY.
-- Exit codes: `0` success, `2` usage error (unknown command, unknown option, missing value), `1` internal error.
-- Errors go to stderr. In JSON mode they are `{"error":{"code":"usage"|"internal","message":"..."}}`.
+- `todo add <title...> [--project p] [--tags a,b] [--due YYYY-MM-DD] [--priority n] [--body text] [--key k]` creates a todo. A repeated `--key` returns the existing todo.
+- `todo ls [--status open|done|cancelled|all] [--project p] [--tags a,b]` lists todos, open ones by default. `--tags` matches todos that have all of them.
+- `todo show <id>` prints one todo.
+- `<id>` is a short id (`t-3fk2`), its suffix without `t-`, or the full ULID.
+- Every store command takes `--dir <path>`. The store is the first of `--dir`, `$TODO_DIR`, the nearest `.todo/` above the cwd, `~/.todo`.
+- Write commands take `--as <actor>` (`human:<name>` or `agent:<name>`). Without it the actor is `$TODO_ACTOR`, a known agent (`CLAUDECODE=1` is `agent:claude`), then `human:$USER`. Read commands never need an actor.
+- `--json` prints JSON. JSON is also the default when stdout is not a TTY. A todo is the stored todo plus `short_id`. `ls` prints an array.
+- Errors go to stderr. In JSON mode they are `{"error":{"code":"...","message":"..."}}`. Codes and exit statuses:
+
+  | code | exit | when |
+  | --- | --- | --- |
+  | `usage` | 2 | unknown command or option, missing or malformed value |
+  | `invalid` | 2 | a value core rejects: bad date, actor or id |
+  | `not_found` | 3 | no todo with that id |
+  | `ambiguous` | 4 | the id matches several todos; `candidates` lists their short ids |
+  | `conflict` | 5 | the todo changed since the given rev |
+  | `internal` | 1 | anything else |
+
 - `todo --version` prints the version. `todo --help` and `todo <command> --help` print usage.
 - Bare `todo` launches the TUI only when stdin and stdout are both TTYs. Otherwise it prints usage and exits 0.
 - No command ever prompts or reads stdin.

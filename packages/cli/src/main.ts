@@ -1,6 +1,20 @@
+import { homedir } from "node:os";
 import { stripVTControlCharacters } from "node:util";
 import { type ArgsDef, type CittyPlugin, type CommandDef, defineCommand, renderUsage, runCommand } from "citty";
-import { greet } from "@todo/core";
+import {
+  type Actor,
+  AmbiguousIdError,
+  InvalidTodoError,
+  NotFoundError,
+  RevConflictError,
+  STATUSES,
+  type Store,
+  type Todo,
+  findStore,
+  openStore,
+  resolveActor,
+} from "@todo/core";
+import { formatDetail, formatLine, formatList, type TodoView } from "./format";
 import pkg from "../package.json" with { type: "json" };
 
 class UsageError extends Error {}
@@ -20,26 +34,140 @@ const strict: CittyPlugin = {
       if (!(name in declared)) throw new UsageError(`Unknown option ${arg}`);
     }
     for (const [name, def] of Object.entries(declared)) {
-      if (def.type === "string" && args[name] === "") throw new UsageError(`Missing value for --${name}`);
+      if ((def.type === "string" || def.type === "enum") && args[name] === "") throw new UsageError(`Missing value for --${name}`);
     }
   },
 };
 
-const hello = defineCommand({
-  meta: { name: "hello", description: "Print a greeting" },
+// citty drops extra positionals, and `todo done a b` must not quietly skip b.
+const oneId: CittyPlugin = {
+  name: "one-id",
+  setup({ args }) {
+    if (args._.length > 1) throw new UsageError(`Expected one todo id, got ${args._.length}`);
+  },
+};
+
+const storeArgs = {
+  dir: { type: "string", description: "Store directory (default: $TODO_DIR, nearest .todo/, ~/.todo)", valueHint: "path" },
+  json: { type: "boolean", description: "Print JSON (default when stdout is not a TTY)" },
+} as const satisfies ArgsDef;
+
+const writeArgs = {
+  ...storeArgs,
+  as: {
+    type: "string",
+    description: "Acting actor, such as human:ada or agent:claude (default: $TODO_ACTOR, a known agent, human:$USER)",
+    valueHint: "actor",
+  },
+} as const satisfies ArgsDef;
+
+const fieldArgs = {
+  project: { type: "string", description: "Project", valueHint: "name" },
+  tags: { type: "string", description: "Comma-separated tags", valueHint: "a,b" },
+  due: { type: "string", description: "Due date", valueHint: "YYYY-MM-DD" },
+  priority: { type: "string", description: "Priority, an integer", valueHint: "n" },
+  body: { type: "string", description: "Markdown body", valueHint: "text" },
+} as const satisfies ArgsDef;
+
+type FieldValues = { project?: string; tags?: string; due?: string; priority?: string; body?: string };
+
+function fields(args: FieldValues) {
+  return {
+    project: args.project,
+    tags: args.tags === undefined ? undefined : list(args.tags),
+    due: args.due,
+    priority: args.priority === undefined ? undefined : integer(args.priority, "priority"),
+    body: args.body,
+  };
+}
+
+function list(value: string): string[] {
+  return value.split(",").map((s) => s.trim());
+}
+
+function integer(value: string, flag: string): number {
+  if (!/^-?\d+$/.test(value)) throw new UsageError(`--${flag} must be an integer, got ${JSON.stringify(value)}`);
+  return Number(value);
+}
+
+function actor(flag: string | undefined): Actor {
+  return resolveActor({ flag, env: process.env }).actor;
+}
+
+function withStore<T>(dir: string | undefined, fn: (store: Store) => T): T {
+  const { root } = findStore({ cwd: process.cwd(), home: homedir(), dir, envDir: process.env.TODO_DIR });
+  const store = openStore(root);
+  try {
+    return fn(store);
+  } finally {
+    store.close();
+  }
+}
+
+function view(store: Store, todo: Todo): TodoView {
+  return { ...todo, short_id: store.shortIds().get(todo.id)! };
+}
+
+function print(value: unknown, human: string): void {
+  if (json) console.log(JSON.stringify(value));
+  else if (human) console.log(human);
+}
+
+const add = defineCommand({
+  meta: { name: "add", description: "Add a todo" },
   args: {
-    name: { type: "string", description: "Who to greet", valueHint: "name" },
-    json: { type: "boolean", description: "Print JSON (default when stdout is not a TTY)" },
+    title: { type: "positional", required: true, description: "Title; the words are joined with spaces" },
+    ...fieldArgs,
+    key: { type: "string", description: "Idempotency key; adding again with it returns the existing todo", valueHint: "key" },
+    ...writeArgs,
   },
   plugins: [strict],
   run({ args }) {
-    const greeting = greet(args.name);
-    console.log(json ? JSON.stringify(greeting) : greeting.message);
+    const by = actor(args.as);
+    withStore(args.dir, (store) => {
+      const todo = view(store, store.create({ title: args._.join(" "), ...fields(args), key: args.key }, by));
+      print(todo, formatLine(todo));
+    });
+  },
+});
+
+const ls = defineCommand({
+  meta: { name: "ls", description: "List todos" },
+  args: {
+    status: { type: "enum", options: [...STATUSES, "all"], default: "open", description: "Status to list" },
+    project: fieldArgs.project,
+    tags: { type: "string", description: "Comma-separated tags; a todo must have all of them", valueHint: "a,b" },
+    ...storeArgs,
+  },
+  plugins: [strict],
+  run({ args }) {
+    withStore(args.dir, (store) => {
+      const status = args.status === "all" ? undefined : (args.status as Todo["status"]);
+      const tags = args.tags === undefined ? undefined : list(args.tags);
+      const short = store.shortIds();
+      const todos = store.list({ status, project: args.project, tags }).map((t) => ({ ...t, short_id: short.get(t.id)! }));
+      print(todos, formatList(todos));
+    });
+  },
+});
+
+const show = defineCommand({
+  meta: { name: "show", description: "Show a todo" },
+  args: {
+    id: { type: "positional", required: true, description: "Todo id: t-3fk2, 3fk2 or the full id" },
+    ...storeArgs,
+  },
+  plugins: [strict, oneId],
+  run({ args }) {
+    withStore(args.dir, (store) => {
+      const todo = view(store, store.get(store.resolveId(args.id)));
+      print(todo, formatDetail(todo));
+    });
   },
 });
 
 // citty's own SubCommandsDef erases each command's args the same way.
-const subCommands: Record<string, CommandDef<any>> = { hello };
+const subCommands: Record<string, CommandDef<any>> = { add, ls, show };
 
 const main = defineCommand({
   meta: { name: "todo", version: pkg.version, description: "A to-do app for humans and agents" },
@@ -73,16 +201,23 @@ async function run(): Promise<void> {
   await runCommand(main, { rawArgs: argv });
 }
 
-function isUsageError(error: unknown): error is Error {
-  return error instanceof UsageError || (error instanceof Error && error.name === "CLIError");
-}
+type ErrorKind = { code: string; exit: number; details?: (error: any) => object };
+
+/** First match wins. Codes and exit statuses are part of the agent contract. */
+const ERRORS: [(error: unknown) => boolean, ErrorKind][] = [
+  [(e) => e instanceof UsageError || (e instanceof Error && e.name === "CLIError"), { code: "usage", exit: 2 }],
+  [(e) => e instanceof InvalidTodoError, { code: "invalid", exit: 2 }],
+  [(e) => e instanceof NotFoundError, { code: "not_found", exit: 3 }],
+  [(e) => e instanceof AmbiguousIdError, { code: "ambiguous", exit: 4, details: (e: AmbiguousIdError) => ({ candidates: e.candidates }) }],
+  [(e) => e instanceof RevConflictError, { code: "conflict", exit: 5 }],
+];
+const INTERNAL: ErrorKind = { code: "internal", exit: 1 };
 
 try {
   await run();
 } catch (error) {
-  const usage = isUsageError(error);
-  const code = usage ? "usage" : "internal";
+  const kind = ERRORS.find(([matches]) => matches(error))?.[1] ?? INTERNAL;
   const message = stripVTControlCharacters(error instanceof Error ? error.message : String(error));
-  console.error(json ? JSON.stringify({ error: { code, message } }) : `todo: ${message}`);
-  process.exitCode = usage ? 2 : 1;
+  console.error(json ? JSON.stringify({ error: { code: kind.code, message, ...kind.details?.(error) } }) : `todo: ${message}`);
+  process.exitCode = kind.exit;
 }
