@@ -146,6 +146,8 @@ Agents use the same CLI as humans, under a stricter contract. No separate API is
   2. `TODO_ACTOR` environment variable
   3. auto-detection of known agents (for example `CLAUDECODE=1` resolves to `agent:claude`)
   4. `$USER`, as `human:<name>`
+
+  An empty `TODO_ACTOR` counts as unset. An invalid `--as` or `TODO_ACTOR` is an error, not a fall-through. If `$USER` is missing or not a valid name, resolution fails and asks for `--as` or `TODO_ACTOR`.
 - **Idempotency.** `todo add --key <key>` makes creates safe to retry: a second create with the same key returns the existing to-do.
 - **Optimistic concurrency.** Every to-do carries a `rev`. Mutations accept `--if-rev <n>` and fail if the to-do changed in the meantime, so an agent never silently overwrites a human's edit.
 - **Never block on input.** The TUI only launches for a bare `todo` in an interactive TTY. Subcommands never prompt.
