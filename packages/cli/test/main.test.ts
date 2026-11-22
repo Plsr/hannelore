@@ -171,6 +171,68 @@ test("invalid flag values exit 2", async () => {
   }
 });
 
+test("edit, done and rm accept a short id", async () => {
+  const { id, short_id } = (await todo("add", "Draft")).json();
+  const edited = await todo("edit", short_id, "--title", "Final", "--tags", "x");
+  expect(edited.exitCode).toBe(0);
+  expect(edited.json()).toMatchObject({ id, short_id, title: "Final", tags: ["x"], rev: 2 });
+
+  const finished = await todo("done", short_id);
+  expect(finished.json()).toMatchObject({ id, status: "done", rev: 3 });
+  expect((await todo("ls")).json()).toEqual([]);
+
+  const removed = await todo("rm", short_id);
+  expect(removed.exitCode).toBe(0);
+  expect(removed.json()).toEqual({ id, short_id, deleted: true });
+  expect((await todo("show", id)).exitCode).toBe(3);
+});
+
+test("edit --clear unsets project, due and priority", async () => {
+  const { id } = (await todo("add", "Full", "--project", "p", "--due", "2026-12-01", "--priority", "1")).json();
+  const cleared = (await todo("edit", id, "--clear", "project,due,priority")).json();
+  expect(cleared).not.toHaveProperty("project");
+  expect(cleared).not.toHaveProperty("due");
+  expect(cleared).not.toHaveProperty("priority");
+  expect((await todo("show", id)).json()).toEqual(cleared);
+});
+
+test("edit without a change, or with a bad --clear, exits 2 and changes nothing", async () => {
+  const { id, rev } = (await todo("add", "Same", "--project", "p")).json();
+  for (const args of [[], ["--clear", "title"], ["--project", "q", "--clear", "project"]]) {
+    const { stderr, exitCode } = await todo("edit", id, ...args);
+    expect(exitCode).toBe(2);
+    expect(JSON.parse(stderr)).toMatchObject({ error: { code: "usage" } });
+  }
+  expect((await todo("show", id)).json()).toMatchObject({ project: "p", rev });
+});
+
+test("a write with a stale --if-rev exits 5 with code conflict", async () => {
+  const { id } = (await todo("add", "Contested")).json();
+  await todo("edit", id, "--title", "Changed");
+  const { stderr, exitCode } = await todo("done", id, "--if-rev", "1");
+  expect(exitCode).toBe(5);
+  expect(JSON.parse(stderr)).toMatchObject({ error: { code: "conflict" } });
+  expect((await todo("done", id, "--if-rev", "2")).json().status).toBe("done");
+});
+
+test("history lists create and update events with their actor and diff", async () => {
+  const { id } = (await todoWith({ TODO_ACTOR: "agent:bot" }, "add", "Tracked")).json();
+  await todo("done", id, "--as", "human:ada");
+  const events = (await todoWith({ USER: undefined }, "history", id)).json();
+  expect(events).toMatchObject([
+    { op: "create", actor: "agent:bot", id, rev: 1 },
+    { op: "update", actor: "human:ada", id, rev: 2, diff: { status: ["open", "done"] } },
+  ]);
+});
+
+test("write commands on an unknown id exit 3", async () => {
+  for (const args of [["edit", "t-zzzz", "--title", "x"], ["done", "t-zzzz"], ["rm", "t-zzzz"], ["history", "t-zzzz"]]) {
+    const { stderr, exitCode } = await todo(...args);
+    expect(exitCode).toBe(3);
+    expect(JSON.parse(stderr)).toMatchObject({ error: { code: "not_found" } });
+  }
+});
+
 test("an unknown command exits 2 with a usage error on stderr", async () => {
   const { stdout, stderr, exitCode } = await todo("nope");
   expect(exitCode).toBe(2);
@@ -197,8 +259,10 @@ test("bare todo without a TTY prints usage and exits without reading stdin", asy
   expect(stdout).toContain("add");
 });
 
-test("show with more than one id exits 2 instead of ignoring the rest", async () => {
-  const { stderr, exitCode } = await todo("show", "t-aaaa", "t-bbbb");
-  expect(exitCode).toBe(2);
-  expect(JSON.parse(stderr)).toMatchObject({ error: { code: "usage" } });
+test("id commands with more than one id exit 2 instead of ignoring the rest", async () => {
+  for (const command of ["show", "edit", "done", "rm", "history"]) {
+    const { stderr, exitCode } = await todo(command, "t-aaaa", "t-bbbb");
+    expect(exitCode).toBe(2);
+    expect(JSON.parse(stderr)).toMatchObject({ error: { code: "usage" } });
+  }
 });
