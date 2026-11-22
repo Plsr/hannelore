@@ -10,11 +10,12 @@ import {
   STATUSES,
   type Store,
   type Todo,
+  type TodoPatch,
   findStore,
   openStore,
   resolveActor,
 } from "@todo/core";
-import { formatDetail, formatLine, formatList, type TodoView } from "./format";
+import { formatDetail, formatEvent, formatLine, formatList, type TodoView } from "./format";
 import pkg from "../package.json" with { type: "json" };
 
 class UsageError extends Error {}
@@ -61,6 +62,14 @@ const writeArgs = {
   },
 } as const satisfies ArgsDef;
 
+const idArg = {
+  id: { type: "positional", required: true, description: "Todo id: t-3fk2, 3fk2 or the full id" },
+} as const satisfies ArgsDef;
+
+const revArg = {
+  "if-rev": { type: "string", description: "Fail with a conflict unless the todo is at this rev", valueHint: "n" },
+} as const satisfies ArgsDef;
+
 const fieldArgs = {
   project: { type: "string", description: "Project", valueHint: "name" },
   tags: { type: "string", description: "Comma-separated tags", valueHint: "a,b" },
@@ -88,6 +97,10 @@ function list(value: string): string[] {
 function integer(value: string, flag: string): number {
   if (!/^-?\d+$/.test(value)) throw new UsageError(`--${flag} must be an integer, got ${JSON.stringify(value)}`);
   return Number(value);
+}
+
+function revOpts(args: { "if-rev"?: string }): { ifRev?: number } {
+  return { ifRev: args["if-rev"] === undefined ? undefined : integer(args["if-rev"], "if-rev") };
 }
 
 function actor(flag: string | undefined): Actor {
@@ -154,7 +167,7 @@ const ls = defineCommand({
 const show = defineCommand({
   meta: { name: "show", description: "Show a todo" },
   args: {
-    id: { type: "positional", required: true, description: "Todo id: t-3fk2, 3fk2 or the full id" },
+    ...idArg,
     ...storeArgs,
   },
   plugins: [strict, oneId],
@@ -166,8 +179,81 @@ const show = defineCommand({
   },
 });
 
+const CLEARABLE = ["project", "due", "priority"] as const;
+const isClearable = (field: string): field is (typeof CLEARABLE)[number] => (CLEARABLE as readonly string[]).includes(field);
+
+const edit = defineCommand({
+  meta: { name: "edit", description: "Change a todo's fields" },
+  args: {
+    ...idArg,
+    title: { type: "string", description: "Title", valueHint: "text" },
+    status: { type: "enum", options: [...STATUSES], description: "Status" },
+    ...fieldArgs,
+    clear: { type: "string", description: `Comma-separated fields to unset: ${CLEARABLE.join(", ")}`, valueHint: "fields" },
+    ...revArg,
+    ...writeArgs,
+  },
+  plugins: [strict, oneId],
+  run({ args }) {
+    const patch: TodoPatch = { title: args.title, status: args.status as TodoPatch["status"], ...fields(args) };
+    for (const field of args.clear === undefined ? [] : list(args.clear)) {
+      if (!isClearable(field)) throw new UsageError(`--clear takes ${CLEARABLE.join(", ")}, got ${JSON.stringify(field)}`);
+      if (patch[field] !== undefined) throw new UsageError(`--${field} and --clear ${field} conflict`);
+      patch[field] = null;
+    }
+    if (Object.values(patch).every((v) => v === undefined)) throw new UsageError("Nothing to edit: pass a field option or --clear");
+    const opts = revOpts(args);
+    const by = actor(args.as);
+    withStore(args.dir, (store) => {
+      const todo = view(store, store.update(store.resolveId(args.id), patch, by, opts));
+      print(todo, formatLine(todo));
+    });
+  },
+});
+
+const done = defineCommand({
+  meta: { name: "done", description: "Mark a todo done" },
+  args: { ...idArg, ...revArg, ...writeArgs },
+  plugins: [strict, oneId],
+  run({ args }) {
+    const opts = revOpts(args);
+    const by = actor(args.as);
+    withStore(args.dir, (store) => {
+      const todo = view(store, store.update(store.resolveId(args.id), { status: "done" }, by, opts));
+      print(todo, formatLine(todo));
+    });
+  },
+});
+
+const rm = defineCommand({
+  meta: { name: "rm", description: "Delete a todo" },
+  args: { ...idArg, ...revArg, ...writeArgs },
+  plugins: [strict, oneId],
+  run({ args }) {
+    const opts = revOpts(args);
+    const by = actor(args.as);
+    withStore(args.dir, (store) => {
+      const todo = view(store, store.get(store.resolveId(args.id)));
+      store.delete(todo.id, by, opts);
+      print({ id: todo.id, short_id: todo.short_id, deleted: true }, `deleted ${formatLine(todo)}`);
+    });
+  },
+});
+
+const history = defineCommand({
+  meta: { name: "history", description: "List a todo's changes, oldest first" },
+  args: { ...idArg, ...storeArgs },
+  plugins: [strict, oneId],
+  run({ args }) {
+    withStore(args.dir, (store) => {
+      const events = store.history(store.resolveId(args.id));
+      print(events, events.map(formatEvent).join("\n"));
+    });
+  },
+});
+
 // citty's own SubCommandsDef erases each command's args the same way.
-const subCommands: Record<string, CommandDef<any>> = { add, ls, show };
+const subCommands: Record<string, CommandDef<any>> = { add, ls, show, edit, done, rm, history };
 
 const main = defineCommand({
   meta: { name: "todo", version: pkg.version, description: "A to-do app for humans and agents" },

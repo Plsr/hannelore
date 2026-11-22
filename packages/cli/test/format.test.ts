@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { TodoId } from "@todo/core";
-import { formatDetail, formatLine, formatList, type TodoView } from "../src/format";
+import { formatDetail, formatEvent, formatLine, formatList, type TodoView } from "../src/format";
 
 const base: TodoView = {
   id: "01JD3K7Q9XW2M4V8R5T6Y13FK2" as TodoId,
@@ -47,5 +47,13 @@ test("formatDetail lists the set fields, then the body", () => {
       "",
       "Oat, not cow.",
     ].join("\n"),
+  );
+});
+
+test("formatEvent shows when, who, the op and rev, then each change", () => {
+  const event = { ts: "2026-11-02T10:00:00.000Z", actor: "agent:claude", id: base.id, rev: 2 } as const;
+  expect(formatEvent({ ...event, op: "create", rev: 1 })).toBe("2026-11-02T10:00:00.000Z  agent:claude  create rev 1");
+  expect(formatEvent({ ...event, op: "update", diff: { status: ["open", "done"], due: [null, "2026-12-01"] } })).toBe(
+    '2026-11-02T10:00:00.000Z  agent:claude  update rev 2  status: "open" -> "done"  due: null -> "2026-12-01"',
   );
 });

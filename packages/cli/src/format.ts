@@ -1,4 +1,4 @@
-import type { Status, Todo } from "@todo/core";
+import type { Event, Status, Todo } from "@todo/core";
 
 /** A todo as the CLI prints it, in JSON and to humans: the stored todo plus its display id. */
 export type TodoView = Todo & { short_id: string };
@@ -33,4 +33,9 @@ export function formatDetail(todo: TodoView): string {
   ];
   const fields = rows.flatMap(([label, value]) => (value === undefined ? [] : [`${label.padEnd(8)}  ${value}`]));
   return [`${todo.short_id}  ${todo.title}`, ...fields, ...(todo.body ? ["", todo.body] : [])].join("\n");
+}
+
+export function formatEvent(event: Event): string {
+  const changes = Object.entries(event.diff ?? {}).map(([field, [from, to]]) => `${field}: ${JSON.stringify(from)} -> ${JSON.stringify(to)}`);
+  return [event.ts, event.actor, `${event.op} rev ${event.rev}`, ...changes].join("  ");
 }
